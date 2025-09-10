@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmarTanom WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .messages {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f8f9fa;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        input, select, button {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>🌱 SmarTanom WebSocket Test Interface</h1>
+    
+    <div class="grid">
+        <div class="container">
+            <h2>📡 Sensor Data Stream</h2>
+            <div id="sensor-status" class="status disconnected">Disconnected</div>
+            <div id="sensor-messages" class="messages"></div>
+            <div class="controls">
+                <button id="sensor-connect">Connect</button>
+                <button id="sensor-disconnect" disabled>Disconnect</button>
+                <button id="sensor-clear">Clear</button>
+            </div>
+            
+            <h3>Send Test Data</h3>
+            <div class="controls">
+                <select id="sensor-id">
+                    <option value="1">Sensor 1</option>
+                    <option value="2">Sensor 2</option>
+                    <option value="3">Sensor 3</option>
+                </select>
+                <input type="number" id="sensor-value" placeholder="Value" step="0.1">
+                <button id="send-sensor-data" disabled>Send Data</button>
+            </div>
+        </div>
+
+        <div class="container">
+            <h2>🔧 Device Control</h2>
+            <div class="controls">
+                <input type="number" id="device-id" placeholder="Device ID" value="1">
+                <button id="device-connect">Connect to Device</button>
+                <button id="device-disconnect" disabled>Disconnect</button>
+            </div>
+            <div id="device-status" class="status disconnected">Disconnected</div>
+            <div id="device-messages" class="messages"></div>
+            <div class="controls">
+                <button id="device-clear">Clear</button>
+            </div>
+            
+            <h3>Device Status</h3>
+            <div class="controls">
+                <select id="device-status-select">
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="maintenance">Maintenance</option>
+                </select>
+                <button id="send-device-status" disabled>Update Status</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📊 Statistics</h2>
+        <div id="stats">
+            <p>Messages received: <span id="message-count">0</span></p>
+            <p>Last message: <span id="last-message">None</span></p>
+        </div>
+    </div>
+
+    <script>
+        let sensorSocket = null;
+        let deviceSocket = null;
+        let messageCount = 0;
+
+        // WebSocket URLs
+        const sensorWsUrl = `ws://${window.location.host}/ws/sensor-data/`;
+        let deviceWsUrl = `ws://${window.location.host}/ws/device/1/`;
+
+        // DOM elements
+        const sensorStatus = document.getElementById('sensor-status');
+        const sensorMessages = document.getElementById('sensor-messages');
+        const deviceStatus = document.getElementById('device-status');
+        const deviceMessages = document.getElementById('device-messages');
+        const messageCountEl = document.getElementById('message-count');
+        const lastMessageEl = document.getElementById('last-message');
+
+        // Utility functions
+        function addMessage(container, message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const msgEl = document.createElement('div');
+            msgEl.innerHTML = `<span style="color: #666;">[${timestamp}]</span> ${message}`;
+            container.appendChild(msgEl);
+            container.scrollTop = container.scrollHeight;
+            
+            messageCount++;
+            messageCountEl.textContent = messageCount;
+            lastMessageEl.textContent = timestamp;
+        }
+
+        function updateStatus(statusEl, connected, socketType) {
+            if (connected) {
+                statusEl.textContent = `Connected to ${socketType}`;
+                statusEl.className = 'status connected';
+            } else {
+                statusEl.textContent = `Disconnected from ${socketType}`;
+                statusEl.className = 'status disconnected';
+            }
+        }
+
+        // Sensor WebSocket functions
+        function connectSensorSocket() {
+            sensorSocket = new WebSocket(sensorWsUrl);
+            
+            sensorSocket.onopen = function(e) {
+                updateStatus(sensorStatus, true, 'Sensor Stream');
+                addMessage(sensorMessages, '🟢 Connected to sensor data stream');
+                document.getElementById('sensor-connect').disabled = true;
+                document.getElementById('sensor-disconnect').disabled = false;
+                document.getElementById('send-sensor-data').disabled = false;
+            };
+
+            sensorSocket.onmessage = function(e) {
+                const data = JSON.parse(e.data);
+                let message = '';
+                
+                switch(data.type) {
+                    case 'connection_established':
+                        message = `✅ ${data.message}`;
+                        break;
+                    case 'sensor_data':
+                        const sensorData = data.data;
+                        message = `📊 Sensor ${sensorData.sensor_id} (${sensorData.sensor_type}): ${sensorData.value} ${sensorData.unit} from ${sensorData.device_name}`;
+                        break;
+                    case 'pong':
+                        message = `🏓 Pong received`;
+                        break;
+                    case 'error':
+                        message = `❌ Error: ${data.message}`;
+                        break;
+                    default:
+                        message = `📨 ${JSON.stringify(data)}`;
+                }
+                
+                addMessage(sensorMessages, message);
+            };
+
+            sensorSocket.onclose = function(e) {
+                updateStatus(sensorStatus, false, 'Sensor Stream');
+                addMessage(sensorMessages, '🔴 Connection closed');
+                document.getElementById('sensor-connect').disabled = false;
+                document.getElementById('sensor-disconnect').disabled = true;
+                document.getElementById('send-sensor-data').disabled = true;
+            };
+
+            sensorSocket.onerror = function(e) {
+                addMessage(sensorMessages, '❌ WebSocket error occurred');
+            };
+        }
+
+        function disconnectSensorSocket() {
+            if (sensorSocket) {
+                sensorSocket.close();
+            }
+        }
+
+        function sendSensorData() {
+            if (sensorSocket && sensorSocket.readyState === WebSocket.OPEN) {
+                const sensorId = document.getElementById('sensor-id').value;
+                const value = document.getElementById('sensor-value').value;
+                
+                if (value) {
+                    const message = {
+                        type: 'sensor_data',
+                        sensor_id: parseInt(sensorId),
+                        value: parseFloat(value)
+                    };
+                    
+                    sensorSocket.send(JSON.stringify(message));
+                    addMessage(sensorMessages, `📤 Sent: Sensor ${sensorId} = ${value}`);
+                    document.getElementById('sensor-value').value = '';
+                }
+            }
+        }
+
+        // Device WebSocket functions
+        function connectDeviceSocket() {
+            const deviceId = document.getElementById('device-id').value;
+            if (!deviceId) return;
+            
+            deviceWsUrl = `ws://${window.location.host}/ws/device/${deviceId}/`;
+            deviceSocket = new WebSocket(deviceWsUrl);
+            
+            deviceSocket.onopen = function(e) {
+                updateStatus(deviceStatus, true, `Device ${deviceId}`);
+                addMessage(deviceMessages, `🟢 Connected to device ${deviceId}`);
+                document.getElementById('device-connect').disabled = true;
+                document.getElementById('device-disconnect').disabled = false;
+                document.getElementById('send-device-status').disabled = false;
+            };
+
+            deviceSocket.onmessage = function(e) {
+                const data = JSON.parse(e.data);
+                let message = '';
+                
+                switch(data.type) {
+                    case 'device_connected':
+                        const device = data.device;
+                        message = `✅ Connected to ${device.device_name} (Status: ${device.status})`;
+                        break;
+                    case 'device_status':
+                        message = `🔄 Device ${data.device_id} status updated to: ${data.status}`;
+                        break;
+                    case 'sensor_data':
+                        const sensorData = data.data;
+                        message = `📊 Device sensor data: ${sensorData.sensor_type} = ${sensorData.value} ${sensorData.unit}`;
+                        break;
+                    default:
+                        message = `📨 ${JSON.stringify(data)}`;
+                }
+                
+                addMessage(deviceMessages, message);
+            };
+
+            deviceSocket.onclose = function(e) {
+                updateStatus(deviceStatus, false, 'Device');
+                addMessage(deviceMessages, '🔴 Device connection closed');
+                document.getElementById('device-connect').disabled = false;
+                document.getElementById('device-disconnect').disabled = true;
+                document.getElementById('send-device-status').disabled = true;
+            };
+
+            deviceSocket.onerror = function(e) {
+                addMessage(deviceMessages, '❌ Device WebSocket error occurred');
+            };
+        }
+
+        function disconnectDeviceSocket() {
+            if (deviceSocket) {
+                deviceSocket.close();
+            }
+        }
+
+        function sendDeviceStatus() {
+            if (deviceSocket && deviceSocket.readyState === WebSocket.OPEN) {
+                const status = document.getElementById('device-status-select').value;
+                
+                const message = {
+                    type: 'device_status',
+                    status: status
+                };
+                
+                deviceSocket.send(JSON.stringify(message));
+                addMessage(deviceMessages, `📤 Sent status update: ${status}`);
+            }
+        }
+
+        // Event listeners
+        document.getElementById('sensor-connect').addEventListener('click', connectSensorSocket);
+        document.getElementById('sensor-disconnect').addEventListener('click', disconnectSensorSocket);
+        document.getElementById('send-sensor-data').addEventListener('click', sendSensorData);
+        document.getElementById('sensor-clear').addEventListener('click', () => {
+            sensorMessages.innerHTML = '';
+        });
+
+        document.getElementById('device-connect').addEventListener('click', connectDeviceSocket);
+        document.getElementById('device-disconnect').addEventListener('click', disconnectDeviceSocket);
+        document.getElementById('send-device-status').addEventListener('click', sendDeviceStatus);
+        document.getElementById('device-clear').addEventListener('click', () => {
+            deviceMessages.innerHTML = '';
+        });
+
+        // Allow Enter key to send sensor data
+        document.getElementById('sensor-value').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendSensorData();
+            }
+        });
+
+        // Send ping every 30 seconds to keep connection alive
+        setInterval(() => {
+            if (sensorSocket && sensorSocket.readyState === WebSocket.OPEN) {
+                sensorSocket.send(JSON.stringify({
+                    type: 'ping',
+                    timestamp: new Date().toISOString()
+                }));
+            }
+        }, 30000);
+    </script>
+</body>
+</html>
