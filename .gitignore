@@ -10,6 +10,8 @@ media/
 
 # Environment variables
 .env
+.env.local
+.env.production
 .venv
 env/
 venv/
@@ -72,3 +74,15 @@ celerybeat.pid
 # Temporary files
 *.tmp
 *.temp
+
+# Logs
+logs/
+*.log
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+
+# Local configuration
+config/local_settings.py
